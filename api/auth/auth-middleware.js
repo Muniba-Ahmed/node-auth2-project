@@ -1,4 +1,6 @@
 const { JWT_SECRET } = require("../secrets"); // use this secret!
+const { findBy } = require("../users/users-model");
+const jwt = require("jsonwebtoken");
 
 const restricted = (req, res, next) => {
   /*
@@ -16,7 +18,18 @@ const restricted = (req, res, next) => {
 
     Put the decoded token in the req object, to make life easier for middlewares downstream!
   */
-  next();
+  const token = req.headers.authorization;
+  if (!token) {
+    return next({ status: 401, message: "Token required" });
+  }
+  jwt.verify(token, JWT_SECRET, (err, decodedToken) => {
+    if (err) {
+      next({ status: 401, message: "Token invalid" });
+    } else {
+      req.decodedToken = decodedToken;
+      next();
+    }
+  });
 };
 
 const only = (role_name) => (req, res, next) => {
@@ -30,10 +43,14 @@ const only = (role_name) => (req, res, next) => {
 
     Pull the decoded token from the req object, to avoid verifying it again!
   */
-  next();
+  if (role_name === req.decodedToken.role_name) {
+    next();
+  } else {
+    next({ status: 403, message: "This is not for you" });
+  }
 };
 
-const checkUsernameExists = (req, res, next) => {
+const checkUsernameExists = async (req, res, next) => {
   /*
     If the username in req.body does NOT exist in the database
     status 401
@@ -41,7 +58,22 @@ const checkUsernameExists = (req, res, next) => {
       "message": "Invalid credentials"
     }
   */
-  next();
+  try {
+    const [user] = await findBy({ username: req.body.username });
+    if (!user) {
+      res.status(401).json({ message: "Invalid credentials" });
+    } else {
+      req.user = user;
+      next();
+    }
+  } catch (err) {
+    next(err);
+  }
+  // if (!req.body.username) {
+  //   res.status(401).json({ message: "Invalid credentials" });
+  // } else {
+  //   next();
+  // }
 };
 
 const validateRoleName = (req, res, next) => {
@@ -71,7 +103,7 @@ const validateRoleName = (req, res, next) => {
   } else if (req.body.role_name.trim().length > 32) {
     next({ status: 422, message: "Role name can not be longer than 32 chars" });
   } else {
-    // req.role_name = req.body.role_name.trim()
+    req.role_name = req.body.role_name.trim();
     next();
   }
 };
